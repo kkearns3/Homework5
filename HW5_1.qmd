@@ -1,0 +1,532 @@
+---
+title: "Homework 5: EDA Practice"
+format: html
+toc: TRUE
+---
+
+Libraries
+```{r}
+library(tidyverse)
+```
+
+# Task 1: Read in the Data and Modify
+
+## Reading in with Base R
+
+Read in csv data, using a modification of the R code in the zipped file download. 
+```{r}
+d1 <- read.table("student-mat.csv",sep=";",header=TRUE)
+d2 <- read.table("student-por.csv",sep=";",header=TRUE)
+
+d3 <- merge(d1,
+            d2,
+            by=c("school","sex","age","address","famsize","Pstatus","Medu","Fedu",
+                 "Mjob","Fjob","reason","nursery","internet"))
+
+print(nrow(d3)) # 382 students
+```
+
+## Reading in with Tidyverse
+
+Read in and combine datasets using tidyverse (semicolon delimiter).
+
+```{r}
+student_mat <- read_csv2("student-mat.csv")
+student_por <- read_csv2("student-por.csv")
+
+student_all <- student_mat |>
+  inner_join(student_por, by = c("school","sex","age","address","famsize",
+                                 "Pstatus","Medu","Fedu","Mjob","Fjob","reason",
+                                 "nursery","internet"))
+```
+There are at least a couple of issues with the resulting data set.
+
+- The warning above shows that the criteria on which the data sets were joined do not have a unique set of values for each observation, so this duplicates observations (i.e. a many-to-many match). 
+- Additionally, after inner joining there are only 382 observations, whereas both the math and portuguese datasets had more than this--395 and 649, respectively. Therefore, the final dataset has dropped observations from both datasets since they didn't have a match in the other one.
+- Because this only joined on a handful of columns, and the initial data sets both have the same variables, there are a lot of columns with potentially duplicated information.
+
+### Tidyverse - join on additional columns
+
+Still use tidyverse, but join on all variables in each data set, except for G1, G2, G3, paid, and absences.
+
+```{r}
+# create a set of columns to join on
+join_columns <- names(student_mat) |>
+  setdiff(c("G1", "G2", "G3", "paid", "absences"))
+
+# join the data sets
+student_combined <- student_mat |>
+  inner_join(student_por, by = join_columns, suffix = c("_mat", "_por"))
+
+print(nrow(student_combined))
+```
+
+No warnings this time, but there are only 320 rows, so I know it doesn't have all observations from either data set since some didn't match observations in the other data set.
+
+## Categorical variables: convert to factor
+
+Convert 4 categorical variables to factors using mutate
+```{r}
+# math data set
+student_mat <- student_mat |>
+  mutate(studytimeF = factor(studytime,
+                             levels = c(1, 2, 3, 4),
+                             labels = c("<2 hours", "2 to 5 hours", 
+                                        "5 to 10 hours",">10 hours")),
+         schoolsupF = as.factor(schoolsup),
+         famsupF = as.factor(famsup),
+         addressF = factor(address, 
+                           levels = c("U", "R"), 
+                           labels = c("Urban", "Rural"))
+         )
+
+# portuguese data set
+student_por <- student_por |>
+  mutate(studytimeF = factor(studytime,
+                             levels = c(1, 2, 3, 4),
+                             labels = c("<2 hours", "2 to 5 hours", 
+                                        "5 to 10 hours",">10 hours")),
+         schoolsupF = as.factor(schoolsup),
+         famsupF = as.factor(famsup),
+         addressF = factor(address, 
+                           levels = c("U", "R"), 
+                           labels = c("Urban", "Rural"))
+         )
+
+# combined data set
+student_combined <- student_combined |>
+  mutate(studytimeF = factor(studytime,
+                             levels = c(1, 2, 3, 4),
+                             labels = c("<2 hours", "2 to 5 hours", 
+                                        "5 to 10 hours",">10 hours")),
+         schoolsupF = as.factor(schoolsup),
+         famsupF = as.factor(famsup),
+         addressF = factor(address, 
+                           levels = c("U", "R"), 
+                           labels = c("Urban", "Rural"))
+         )
+```
+
+# Task 2: Summarize the Data (Very Basic EDA)
+
+## How Data is Stored
+
+*Data validation: checking basic summary statistics*
+
+```{r}
+psych::describe(student_combined)
+```
+
+- I compared the above values with the documentation provided on the [data download website](https://archive.ics.uci.edu/dataset/320/student+performance).
+- This data validation was done before reviewing the data types of the columns, because I wanted to make sure I was seeing the original values for columns that have numbers as values, but are really categorical - this is because describe() will take character columns and convert them to numeric values as 1, 2, 3, etc.
+- For the categorical variables (marked with asterisks in the above table), I used min and max values just to verify that the number of different values in that column make sense (i.e. for school, the min is 1 and the max is 2, indicating there are indeed 2 schools in the data set, as expected).
+- For numeric variables, I compared min and max with the range of values provided in the documentation. So for instance, age has min of 15 and max of 22, which is the same as the range provided by the authors of the study.
+- One set of values that struck me as odd were failures. Documentation states that the range is 1-4. However, in the combined data the min is 0 and the max is 3. I checked the counts for each value in the combined and the original data sets (see below), since I wondered if there were some in math or portuguese data sets that were lost after the inner join. However, there were no 4+ failures in any of them.
+
+```{r}
+student_combined |>
+  group_by(failures) |>
+  summarize(count = n())
+```
+
+```{r}
+student_mat |>
+  group_by(failures) |>
+  summarize(count = n())
+```
+
+```{r}
+student_por |>
+  group_by(failures) |>
+  summarize(count = n())
+```
+
+
+```{r}
+str(student_combined)
+```
+
+*Do the data types make sense?*
+
+::: {}
+1. Medu and Fedu were both read in as numeric, but they are integer representations of education level, so we won't need to do mathematical operations on them. Therefore, they can be recast as character.
+2. traveltime and studytime should probably also be recast as character since they are really categorical, and the numbers represent time ranges rather than length of time.
+3. failures should be changed to character, since even though n < 4 is the actual number of failures, 4 is a catchall for anything more than 3 failures. Mathematical operations can be done if filtered on n < 4, but it might be best to change it to character since just excluding a high number of failures might not have a lot of analytic value.
+4. There are 10 variables that are just yes/no fields, so they are binary. Technically they can be stored as boolean, but they'll be left as yes/no just because those values look nicer in tables and there's not a chance of accidentally coercing them to numeric like there is with boolean.
+5. famrel, freetime, goout, Dalc, Walc, and health are all ranked measures on a scale of 1 to 5. These will be stored as character.
+:::
+
+```{r}
+student_combined <- student_combined |>
+  mutate(Medu = as.character(Medu),
+         Fedu = as.character(Fedu),
+         traveltime = as.character(traveltime),
+         studytime = as.character(studytime),
+         failures = as.character(failures), 
+         famrel = as.character(famrel),
+         freetime = as.character(freetime),
+         goout = as.character(goout),
+         Dalc = as.character(Dalc),
+         Walc = as.character(Walc),
+         health = as.character(health)
+         )
+```
+
+
+## Missing Values
+
+```{r}
+sum_na <- function(column) {
+  sum(is.na(column))
+}
+
+na_counts <- student_combined |>
+  summarize(across(everything(), sum_na)) |>
+  pivot_longer(cols = everything(), names_to = "Variable", values_to = "count")
+
+na_counts
+```
+No missing values are found, which is consistent with the documentation for the data set.
+
+
+## Categorical Variables
+
+### Contingency Tables
+
+Combined data set, using table()
+
+(@) One-way contingency table
+
+```{r}
+table(student_combined$addressF)
+```
+
+There are 253 students in this study who live at an urban address.
+
+(@) Two-way contingency table
+
+```{r}
+table(student_combined$addressF, student_combined$studytimeF)
+```
+
+There are only 6 rural students who spend more than 10 hours studying.
+
+(@) Three-way contingency table
+
+```{r}
+table(student_combined$studytimeF,
+      student_combined$famsupF,
+      student_combined$addressF)
+```
+The number of urban students that have family support and also devote 2 to 5 hours to studying is 89.
+
+### Conditional Contingency Tables
+
+1. Conditional two-way table in base R
+
+- Subset data, then create table with table()
+
+```{r}
+
+data_subset <- student_combined |>
+  filter(schoolsupF == "no")
+
+table(data_subset$famsupF, data_subset$studytimeF)
+```
+
+2. Conditional two-way table in base R
+
+- Create a three-way table with table(), then subset it
+```{r}
+data_table <- table(student_combined$famsupF,
+                    student_combined$studytimeF,
+                    student_combined$schoolsupF)
+
+data_table[ , , "no"]
+```
+3. Two-way contingency table using dplyr
+
+- Utilize group_by(), summarize(), pivot_wider()
+
+```{r}
+student_combined |>
+  group_by(famsupF, studytimeF) |>
+  summarize(count = n()) |>
+  pivot_wider(names_from = studytimeF, values_from = count)
+```
+
+### Bar graphs
+
+1. Stacked bar graph
+
+```{r}
+g <- ggplot(data = student_combined, aes(x = famsupF, fill = studytimeF))
+g + 
+  geom_bar() + 
+  ggtitle("Study time with and without Family Support") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Family Support", y = "Number of Students") +
+  scale_fill_discrete("Study Time")
+```
+Students are more likely than not to have family support. Most kids in both groups put in between 0 and 5 hours of studying. When they do put in up to 5 hours of studying, the kids with family support are more likely to devote 2-5 hours of studying, rather than <2 hours.
+
+
+2. Side-by-side bar graph
+
+```{r}
+g <- ggplot(data = student_combined, aes(x = famsupF, fill = studytimeF))
+g + 
+  geom_bar(position = "dodge") + 
+  ggtitle("Study time with and without Family Support") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Family Support", y = "Number of Students") +
+  scale_fill_discrete("Study Time")
+```
+The side-by-side bars make it easier to see that almost the same number of students in both groups are in the <2 hours category. With or without family support, not many students are putting in more than 10 hours, but a significantly higher proportion of kids with family support allocate 5 to 10 hours to studying compared to the non-supported kids.
+
+## Numeric Variables
+
+### Measures of center and spread (no grouping)
+
+- Measures of center and spread, 3 numeric variables, full data
+
+```{r}
+student_combined |>
+  summarize(across(c(age, absences_mat, G3_mat),
+                   list("mean" = mean, "median" = median, "IQR" = IQR, "sd" = sd),
+                   .names = "{.fn}_{.col}"))
+```
+
+- Measures of center and spread, 3 numeric variables with a subset of data
+
+```{r}
+student_combined |>
+  filter(addressF == "Rural") |>
+  summarize(across(c(age, absences_mat, G3_mat),
+                   list("mean" = mean, "median" = median, "IQR" = IQR, "sd" = sd),
+                   .names = "{.fn}_{.col}"))
+```
+
+### Measures of center and spread (grouping with single variable)
+
+- Measure of center
+
+```{r}
+student_combined |>
+  group_by(addressF) |>
+  summarize(across(c(age, absences_mat, G3_mat),
+                   list("mean" = mean, "median" = median),
+                   .names = "{.fn}_{.col}"))
+```
+
+- Measure of spread
+
+```{r}
+student_combined |>
+  group_by(addressF) |>
+  summarize(across(c(age, absences_mat, G3_mat),
+                   list("IQR" = IQR, "sd" = sd),
+                   .names = "{.fn}_{.col}"))
+```
+
+### Measures of center and spread (grouping with two variables)
+
+- Measures of center
+
+```{r}
+student_combined |>
+  group_by(addressF, famsupF) |>
+  summarize(across(c(age, absences_mat, G3_mat),
+                   list("mean" = mean, "median" = median),
+                   .names = "{.fn}_{.col}"))
+```
+
+- Measures of spread
+
+```{r}
+student_combined |>
+  group_by(addressF, famsupF) |>
+  summarize(across(c(age, absences_mat, G3_mat),
+                   list("IQR" = IQR, "sd" = sd),
+                   .names = "{.fn}_{.col}"))
+```
+
+
+### Correlation matrix for all numeric variables
+
+```{r}
+student_combined |>
+  select(where(is.numeric)) |>
+  cor() |>
+  round(2)
+```
+
+It's interesting that G1, G2, and G3 scores within the same subject are highly correlated with each other, while the scores between subjects still correlate, just not as strongly. Students may apply the same set of study skills across subjects, so that their scores would be related. It makes intuitive sense that the correlation of scores in different subjects would be less strong, since math and portuguese require differing sets of skills to perform well. There seems to be no discernible linear relationship among the other numeric variables. 
+
+### Histogram, kernel density plot, and boxplot
+
+- 2 numeric variables and 1 categorical variable (3 graphs each)
+
+#### G3_por (numeric) vs. studytimeF (categorical)
+
+Histogram
+```{r}
+g <- ggplot(data = student_combined, aes(x = G3_por))
+
+g + geom_histogram(aes(fill = studytimeF), bins = 20) +
+  ggtitle("Final (G3) Portuguese Scores by Study Time") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Final Score (Portuguese)", y = "Number of Students") +
+  scale_fill_discrete("Study Time")
+
+```
+
+Kernel density plot
+```{r}
+g + geom_density(aes(fill = studytimeF), kernel = "gaussian", alpha = 0.4) +
+  ggtitle("Final (G3) Portuguese Scores by Study Time") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Final Score (Portuguese)", y = "Proportion of Students") +
+  scale_fill_discrete("Study Time")
+
+```
+
+Boxplot
+```{r}
+g <- ggplot(data = student_combined)
+
+g + geom_boxplot(aes(x = studytimeF, y = G3_por, fill = studytimeF)) +
+  ggtitle("Final (G3) Portuguese Scores by Study Time") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Study Time", y = "Final Score (Portuguese)") +
+  scale_fill_discrete("Study Time")
+```
+
+
+#### G3_mat (numeric) vs. addressF (categorical)
+
+Histogram
+```{r}
+g <- ggplot(data = student_combined)
+
+g + geom_histogram(aes(x = G3_mat, fill = addressF), binwidth = 2) +
+  ggtitle("Final (G3) Math Scores vs Home Address") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Final Score (Math)", y = "Number of Students") +
+  scale_fill_discrete("Home Address")
+
+```
+
+Kernel density plot
+```{r}
+g + geom_density(aes(x = G3_mat, fill = addressF), 
+                 kernel = "gaussian", 
+                 alpha = 0.4) +
+  ggtitle("Final (G3) Math Scores vs Home Address") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Final Score (Math)", y = "Proportion of Students") +
+  scale_fill_discrete("Home Address")
+
+```
+
+Boxplot
+```{r}
+g + geom_boxplot(aes(x = addressF, y = G3_mat, fill = addressF)) +
+  ggtitle("Final (G3) Math Scores vs Home Address") +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(x = "Home Address", y = "Final Score (Math)") +
+  scale_fill_discrete("Home Address")
+```
+
+### Scatterplots
+
+#### Final vs First Period Portuguese Scores, by study time
+
+```{r}
+g <- ggplot(data = student_combined,
+            mapping = aes(x = G1_por, y = G3_por, color = studytimeF))
+
+g + geom_point() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Final (G3) Portuguese Scores vs First Period Grade \n by Study Time",
+       x = "First Period Score (Portuguese)", 
+       y = "Final Score (Portuguese)",
+       color = "Study Time")
+```
+
+#### Final Math Scores vs Final Portuguese Scores, by study time
+
+```{r}
+g <- ggplot(data = student_combined,
+            mapping = aes(x = G3_mat, y = G3_por, color = studytimeF))
+
+g + geom_point() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Final (G3) Portuguese Scores vs Final (G3) Math Scores \n by Study Time",
+       x = "Final Score (Math)", 
+       y = "Final Score (Portuguese)",
+       color = "Study Time")
+```
+
+#### Final vs First Period Portuguese Scores, by study time, facet by Home Address
+
+```{r}
+g <- ggplot(data = student_combined,
+            mapping = aes(x = G1_por, y = G3_por, color = studytimeF))
+
+g + geom_point() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Final (G3) Portuguese Scores vs First Period Grade \n by Study Time",
+       x = "First Period Score (Portuguese)", 
+       y = "Final Score (Portuguese)",
+       color = "Study Time") +
+  facet_wrap(~ addressF)
+```
+
+
+#### Final Math Scores vs Final Portuguese Scores, by study time, facet by home address
+
+```{r}
+g <- ggplot(data = student_combined,
+            mapping = aes(x = G3_mat, y = G3_por, color = studytimeF))
+
+g + geom_point() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Final (G3) Portuguese Scores vs Final (G3) Math Scores \n by Study Time",
+       x = "Final Score (Math)", 
+       y = "Final Score (Portuguese)",
+       color = "Study Time") +
+  facet_wrap(~ addressF)
+```
+
+
+#### Final vs First Period Portuguese Scores, by study time, facet by Home Address and family support
+
+```{r}
+g <- ggplot(data = student_combined,
+            mapping = aes(x = G1_por, y = G3_por, color = studytimeF))
+
+g + geom_point() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Final (G3) Portuguese Scores vs First Period Grade \n by Study Time",
+       x = "First Period Score (Portuguese)", 
+       y = "Final Score (Portuguese)",
+       color = "Study Time") +
+  facet_grid(famsupF ~ addressF, labeller = label_both)
+```
+
+
+#### Final Math Scores vs Final Portuguese Scores, by study time, facet by home address and family support
+
+```{r}
+g <- ggplot(data = student_combined,
+            mapping = aes(x = G3_mat, y = G3_por, color = studytimeF))
+
+g + geom_point() +
+  theme(plot.title = element_text(hjust = 0.5)) +
+  labs(title = "Final (G3) Portuguese Scores vs Final (G3) Math Scores \n by Study Time",
+       x = "Final Score (Math)", 
+       y = "Final Score (Portuguese)",
+       color = "Study Time") +
+  facet_grid(famsupF ~ addressF, labeller = label_both)
+```
